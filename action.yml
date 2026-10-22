@@ -1,6 +1,6 @@
 name: Setup Alpine Linux environment
 description: >
-  Set up a chroot-based Alpine Linux environment and optionally QEMU user emulator for non-x86 architectures.
+  Set up a chroot-based Alpine Linux (edge, x86_64) environment on a GitHub-hosted Linux runner.
 author: Jakub Jirutka
 branding:
   color: blue
@@ -8,30 +8,11 @@ branding:
 inputs:
   apk-tools-url:
     description: >
-      URL of the apk-tools static binary to use, or `auto` to select a pinned URL for the current
-      runner architecture. Custom URLs must end with `#!sha256!` followed by a SHA-256 hash of the file.
+      URL of the apk-tools static binary to use, or `auto` to select the pinned x86_64 build.
+      Custom URLs must end with `#!sha256!` followed by a SHA-256 hash of the file.
       This should normally be left at the default value.
     required: false
     default: auto
-  arch:
-    description: >
-      CPU architecture to install. If the selected architecture is not natively runnable on the
-      current runner, QEMU is used by default. Allowed values are: `x86_64` (native), `x86`
-      (native), `aarch64`, `armhf` (armv6 with hard-float), `armv7`, `loongarch64` (available
-      since v3.21), `ppc64le`, `riscv64` (available since v3.20), and `s390x`
-    required: false
-    default: x86_64
-  setup-qemu:
-    description: >
-      Whether to install and register QEMU when the selected architecture needs emulation on the
-      current runner. Set to `false` only when using a native compatible runner, such as
-      `ubuntu-24.04-arm` for `aarch64`; otherwise the action will fail early.
-    required: false
-    default: 'true'
-  branch:
-    description: Alpine branch (aka release) to install (e.g. `v3.15`, `latest-stable`, `edge`).
-    required: false
-    default: latest-stable
   extra-keys:
     description: >
       A list of paths of additional trusted keys (for installing packages from the
@@ -42,13 +23,13 @@ inputs:
   extra-repositories:
     description: >
       A list of additional Alpine repositories to add into /etc/apk/repositories (Alpine's official
-      main and community repositories are always added).
+      edge main and community repositories are always added).
     required: false
     default: ''
   mirror-url:
     description: URL of an Alpine Linux mirror to fetch packages from.
     required: false
-    default: http://dl-cdn.alpinelinux.org/alpine
+    default: https://dl-cdn.alpinelinux.org/alpine
   packages:
     description: A list of Alpine packages to install.
     required: false
@@ -63,12 +44,12 @@ inputs:
   volumes:
     description: >
       A list of directories on the host system to mount bind into the chroot. You can specify the
-      source and destination path: `<src-dir>:<dest-dir>``. The `<src-dir>` is an absolute path of
+      source and destination path: `<src-dir>:<dest-dir>`. The `<src-dir>` is an absolute path of
       existing directory on the host system, `<dest-dir>` is an absolute path in the chroot
       (it will be created if doesn't exist). You can omit the latter if they're the same.
 
-      Please note that /home/runner/work (where's your workspace located) is always mounted,
-      don't specify it here.
+      Please note that the runner's work directory (e.g. /home/runner/work, where your workspace
+      is located) is always mounted, don't specify it here.
     required: false
     default: ''
 outputs:

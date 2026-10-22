@@ -1,26 +1,34 @@
 #!/usr/bin/env bash
 # vim: set ts=4 sw=4:
 #
+# Sets up an Alpine Linux edge (x86_64) chroot. Must be run via sudo.
+#
 # Required environment variables:
 # - INPUT_APK_TOOLS_URL
-# - INPUT_ARCH
-# - INPUT_BRANCH
 # - INPUT_EXTRA_KEYS
 # - INPUT_EXTRA_REPOSITORIES
 # - INPUT_MIRROR_URL
 # - INPUT_PACKAGES
-# - INPUT_SETUP_QEMU
 # - INPUT_SHELL_NAME
 # - INPUT_VOLUMES
 #
-set -euo pipefail
+set -Eeuo pipefail
 
-readonly SCRIPT_PATH=$(readlink -f "$0")
-readonly SCRIPT_DIR=$(cd "$(dirname "$0")" && pwd)
+SCRIPT_PATH=$(readlink -f "$0")
+SCRIPT_DIR=$(cd "$(dirname "$0")" && pwd)
+readonly SCRIPT_PATH SCRIPT_DIR
 
+readonly ALPINE_BRANCH='edge'
+readonly ALPINE_ARCH='x86_64'
 readonly ALPINE_BASE_PKGS='alpine-baselayout apk-tools busybox busybox-suid musl-utils'
-readonly RUNNER_HOME="/home/$SUDO_USER"
+
+: "${SUDO_USER:?must be run via sudo}"
+RUNNER_HOME=$(getent passwd "$SUDO_USER" | cut -d: -f6)
+readonly RUNNER_HOME
 readonly ROOTFS_BASE_DIR="$RUNNER_HOME/rootfs"
+# The runner's work directory (e.g. /home/runner/work) containing the workspace.
+WORK_DIR=$(dirname "${RUNNER_WORKSPACE:?}")
+readonly WORK_DIR
 
 
 err_handler() {
@@ -28,13 +36,13 @@ err_handler() {
 	set +e
 
 	# Print error line with 4 lines before/after.
-	awk -v LINENO=$lno -v RED="\033[1;31m" -v RESET="\033[0m" '
+	awk -v LINENO="$lno" -v RED="\033[1;31m" -v RESET="\033[0m" '
 		BEGIN { print "\n" RED "Error occurred at line " LINENO ":" RESET }
 		NR > LINENO - 4 && NR < LINENO + 4 {
 			pad = length(LINENO + 4); err = NR == LINENO
 			printf "%s %" pad "d | %s%s\n", (err ? RED ">" : " "), NR, $0, (err ? RESET : "")
 		}' "$SCRIPT_PATH"
-	line=$(awk -v LINENO=$lno 'NR == LINENO { print $0 }' "$SCRIPT_PATH")
+	line=$(awk -v LINENO="$lno" 'NR == LINENO { print $0 }' "$SCRIPT_PATH")
 
 	die "${_current_group:-"Error"}" \
 	    "Error occurred at line $lno: $line (see the job log for more information)"
@@ -69,43 +77,15 @@ endgroup() {
 	echo '::endgroup::'
 }
 
-# Converts Alpine architecture name to the corresponding QEMU name.
-qemu_arch() {
-	case "$1" in
-		x86 | i[3456]86) echo 'i386';;
-		arm64) echo 'aarch64';;
-		armhf | armv[4-9]) echo 'arm';;
-		*) echo "$1";;
-	esac
+# Prints each whitespace-separated word of $1 on its own line (no glob expansion,
+# nothing printed for an empty list).
+words() {
+	( set -f; for word in $1; do printf '%s\n' "$word"; done )
 }
 
-# Returns 0 if arch $1 is not compatible with the host architecture and needs
-# to be emulated.
-needs_emulator() {
-	local target="$(qemu_arch "$1")"
-	local host="$(qemu_arch "$(uname -m)")"
-
-	[ "$target" = "$host" ] && return 1
-	[ "$host" = x86_64 ] && [ "$target" = i386 ] && return 1
-	return 0
-}
-
-# Returns a pinned apk.static URL for the host architecture.
+# Returns the pinned apk.static URL.
 auto_apk_tools_url() {
-	local host_arch="$(uname -m)"
-
-	case "$host_arch" in
-		x86_64)
-			echo 'https://alpinelinux.opsmaru.net/api/v4/projects/5/packages/generic/v2.14.10/x86_64/apk.static#!sha256!34bb1a96f0258982377a289392d4ea9f3f4b767a4bb5806b1b87179b79ad8a1c'
-			;;
-		aarch64 | arm64)
-			echo 'https://alpinelinux.opsmaru.net/api/v4/projects/5/packages/generic/v2.14.10/aarch64/apk.static#!sha256!e471d35aa221d031abe9b6288aede12a8e9f1a398954e5a2e1d1bce1727b4ef4'
-			;;
-		*)
-			die 'Invalid input parameter: apk-tools-url' \
-			    "Cannot automatically select apk.static for host architecture $host_arch. Set apk-tools-url to an http(s) URL ending with '#!sha256!' followed by a SHA-256 hash."
-			;;
-	esac
+	echo 'https://github.com/rorgoroth/setup-alpine/releases/download/apk.static-3.0.8/apk.static#!sha256!9c16dbcc6328da9c62906c6ba27f96a228b09327230ef7febea694ff15fc942d'
 }
 
 # Downloads a file from URL $1 to path $2 and verify its integrity.
@@ -120,7 +100,7 @@ download_file() {
 		&& return 0
 
 	mkdir -p "$(dirname "$filepath")" \
-		&& curl --connect-timeout 10 -fsSL -o "$filepath" "$url" \
+		&& curl --connect-timeout 10 --retry 3 --retry-all-errors -fsSL -o "$filepath" "$url" \
 		&& sha256_check "$filepath" "$sha256"
 }
 
@@ -131,11 +111,6 @@ sha256_check() {
 
 	(cd "$(dirname "$filepath")" \
 		&& echo "$sha256  ${filepath##*/}" | sha256sum -c)
-}
-
-# Unpacks content of an APK package.
-unpack_apk() {
-	tar -xz "$@" |& sed '/tar: Ignoring unknown extended header/d'
 }
 
 # Binds the directory $1 at the mountpoint $2 and sets propagation to private.
@@ -151,6 +126,11 @@ mount_bind() {
 
 #============================  M a i n  ============================#
 
+if [ "$(uname -m)" != "$ALPINE_ARCH" ]; then
+	die 'Unsupported host' \
+	    "Only $ALPINE_ARCH hosts are supported, but this one is $(uname -m)."
+fi
+
 if [ "$INPUT_APK_TOOLS_URL" = auto ]; then
 	INPUT_APK_TOOLS_URL="$(auto_apk_tools_url)"
 fi
@@ -161,46 +141,28 @@ case "$INPUT_APK_TOOLS_URL" in
 	       "The value must start with https:// or http:// and end with '#!sha256!' followed by a SHA-256 hash of the file to be downloaded, but got: $INPUT_APK_TOOLS_URL"
 esac
 
-case "$INPUT_ARCH" in
-	x86_64 | x86 | aarch64 | armhf | armv7 | loongarch64 | ppc64le | riscv64 | s390x) ;;  # valid
-	*) die 'Invalid input parameter: arch' \
-	       "Expected one of: x86_64, x86, aarch64, armhf, armv7, loongarch64, ppc64le, riscv64, s390x, but got: $INPUT_ARCH."
-esac
+mapfile -t extra_keys < <(words "$INPUT_EXTRA_KEYS")
+mapfile -t extra_repos < <(words "$INPUT_EXTRA_REPOSITORIES")
+mapfile -t packages < <(words "$INPUT_PACKAGES")
+mapfile -t volumes < <(words "$INPUT_VOLUMES")
 
-case "$INPUT_BRANCH" in
-	v[0-9].[0-9]* | edge | latest-stable) ;;  # valid
-	*) die 'Invalid input parameter: branch' \
-	       "Expected 'v[0-9].[0-9]+' (e.g. v3.15), edge, or latest-stable, but got: $INPUT_BRANCH."
-esac
-
-case "$INPUT_SETUP_QEMU" in
-	true | false) ;;  # valid
-	*) die 'Invalid input parameter: setup-qemu' \
-	       "Expected true or false, but got: $INPUT_SETUP_QEMU."
-esac
-
-for path in $INPUT_EXTRA_KEYS; do
+for path in ${extra_keys[@]+"${extra_keys[@]}"}; do
 	if ! [ -r "$GITHUB_WORKSPACE/$path" ]; then
 		die 'Invalid input parameter: extra-keys' \
 		    "File does not exist in workspace or is not readable: $path."
 	fi
 done
 
-if ! expr "$INPUT_SHELL_NAME" : [a-zA-Z][a-zA-Z0-9_.~+@%-]*$ >/dev/null; then
+if ! [[ $INPUT_SHELL_NAME =~ ^[a-zA-Z][a-zA-Z0-9_.~+@%-]*$ ]]; then
 	die 'Invalid input parameter: shell-name' \
 	    "Expected value matching regex ^[a-zA-Z][a-zA-Z0-9_.~+@%-]*$, but got: $INPUT_SHELL_NAME."
-fi
-
-if needs_emulator "$INPUT_ARCH" && [ "$INPUT_SETUP_QEMU" = false ]; then
-	die 'QEMU setup is disabled' \
-	    "arch=$INPUT_ARCH is not natively runnable on this host ($(uname -m)). Use a native compatible runner, for example runs-on: ubuntu-24.04-arm for arch=aarch64, or set setup-qemu to true."
 fi
 
 
 #-----------------------------------------------------------------------
 group 'Prepare rootfs directory'
 
-rootfs_dir="$ROOTFS_BASE_DIR/alpine-${INPUT_BRANCH%-stable}-$INPUT_ARCH"
+rootfs_dir="$ROOTFS_BASE_DIR/alpine-$ALPINE_BRANCH"
 if [ -e "$rootfs_dir" ]; then
 	mkdir -p "$ROOTFS_BASE_DIR"
 	rootfs_dir=$(mktemp -d "$rootfs_dir-XXXXXX")
@@ -209,6 +171,13 @@ else
 	mkdir -p "$rootfs_dir"
 fi
 info "Alpine will be installed into: $rootfs_dir"
+
+# Register the rootfs for cleanup right away, so the post step can unmount
+# and remove it even when the setup fails half way through.
+install -Dv -m755 "$SCRIPT_DIR"/destroy.sh "$rootfs_dir"/destroy.sh
+if [ "${GITHUB_STATE:-}" ]; then
+	echo "root_path=$rootfs_dir" >> "$GITHUB_STATE"
+fi
 
 cd "$RUNNER_TEMP"
 
@@ -224,91 +193,36 @@ chmod +x "$APK"
 
 
 #-----------------------------------------------------------------------
-if needs_emulator "$INPUT_ARCH" && [ "$INPUT_SETUP_QEMU" = true ]; then
-	qemu_arch=$(qemu_arch "$INPUT_ARCH")
-	qemu_cmd="qemu-$qemu_arch"
-
-	group "Install $qemu_cmd emulator"
-
-	# TODO: Consider replacing it with a simple shell script to speed-up
-	#  the installation.
-	if ! command -V update-binfmts >/dev/null 2>&1; then
-		info 'Installing binfmt-support from Ubuntu repository'
-		apt-get install --no-install-recommends -y binfmt-support
-	fi
-
-	if update-binfmts --display $qemu_cmd >/dev/null 2>&1; then
-		info "$qemu_cmd is already installed on the host system"
-
-	else
-		# apt-get is terribly slow - installing qemu-user-static via apt-get
-		# takes anywhere from ten seconds to tens of seconds. This method takes
-		# less than a second.
-		info "Fetching $qemu_cmd from the latest-stable Alpine repository"
-		$APK fetch \
-			--keys-dir "$SCRIPT_DIR"/keys \
-			--repository "$INPUT_MIRROR_URL/latest-stable/community" \
-			--no-progress \
-			--no-cache \
-			$qemu_cmd
-
-		info "Unpacking $qemu_cmd and installing on the host system"
-		unpack_apk -f ./$qemu_cmd-*.apk usr/bin/$qemu_cmd
-		mv usr/bin/$qemu_cmd /usr/local/bin/
-		rm ./$qemu_cmd-*.apk
-
-		info "Registering binfmt for $qemu_arch"
-		update-binfmts --import "$SCRIPT_DIR"/binfmts/$qemu_cmd
-	fi
-fi
-
-
-#-----------------------------------------------------------------------
-group "Initialize Alpine Linux $INPUT_BRANCH ($INPUT_ARCH)"
+group "Initialize Alpine Linux $ALPINE_BRANCH ($ALPINE_ARCH)"
 
 cd "$rootfs_dir"
 
 info 'Creating /etc/apk/repositories:'
 mkdir -p etc/apk
 printf '%s\n' \
-	"$INPUT_MIRROR_URL/$INPUT_BRANCH/main" \
-	"$INPUT_MIRROR_URL/$INPUT_BRANCH/community" \
-	$INPUT_EXTRA_REPOSITORIES \
+	"$INPUT_MIRROR_URL/$ALPINE_BRANCH/main" \
+	"$INPUT_MIRROR_URL/$ALPINE_BRANCH/community" \
+	${extra_repos[@]+"${extra_repos[@]}"} \
 	| tee etc/apk/repositories
 
-cp -r "$SCRIPT_DIR"/keys etc/apk/
+mkdir -p etc/apk/keys
+install -m644 -t etc/apk/keys "$SCRIPT_DIR"/keys/*.pub
 
-for path in $INPUT_EXTRA_KEYS; do
+for path in ${extra_keys[@]+"${extra_keys[@]}"}; do
 	cp "$GITHUB_WORKSPACE/$path" etc/apk/keys/
 done
 
 cat /etc/resolv.conf > etc/resolv.conf
 
-release_pkg='alpine-release'
-if [ "${INPUT_BRANCH#v}" != "$INPUT_BRANCH" ] && [ "$($APK version -t "$INPUT_BRANCH" 'v3.17')" = '<' ]; then
-	release_pkg=''
-fi
-
 info "Installing base packages into $(pwd)"
+# shellcheck disable=SC2086  # ALPINE_BASE_PKGS is a word list
 $APK add \
 	--root . \
 	--initdb \
 	--no-progress \
 	--update-cache \
-	--arch "$INPUT_ARCH" \
-	$ALPINE_BASE_PKGS $release_pkg
-
-if ! [ "$release_pkg" ]; then
-	# This package contains /etc/os-release, /etc/alpine-release and /etc/issue,
-	# but we don't wanna install all its dependencies (e.g. openrc).
-	info 'Fetching and unpacking /etc from alpine-base'
-	$APK fetch \
-		--root . \
-		--no-progress \
-		--stdout \
-		alpine-base \
-		| unpack_apk etc
-fi
+	--arch "$ALPINE_ARCH" \
+	$ALPINE_BASE_PKGS alpine-release
 
 
 #-----------------------------------------------------------------------
@@ -318,15 +232,14 @@ mkdir -p proc
 mount -v -t proc none proc
 mount_bind /dev dev
 mount_bind /sys sys
-mount_bind "$RUNNER_HOME/work" "${RUNNER_HOME#/}/work"
+mount_bind "$WORK_DIR" "${WORK_DIR#/}"
 
 # Some systems (Ubuntu?) symlinks /dev/shm to /run/shm.
 if [ -L /dev/shm ] && [ -d /run/shm ]; then
 	mount_bind /run/shm run/shm
 fi
 
-for vol in $INPUT_VOLUMES; do
-	[ "$vol" ] || continue
+for vol in ${volumes[@]+"${volumes[@]}"}; do
 	src=${vol%%:*}
 	dst=${vol#*:}
 
@@ -338,14 +251,13 @@ done
 group 'Copy action scripts'
 
 install -Dv -m755 "$SCRIPT_DIR"/alpine.sh abin/"$INPUT_SHELL_NAME"
-install -Dv -m755 "$SCRIPT_DIR"/destroy.sh .
 
 
 #-----------------------------------------------------------------------
-if [ "$INPUT_PACKAGES" ]; then
+if [ ${#packages[@]} -gt 0 ]; then
 	group 'Install packages'
 
-	pkgs=$(printf '%s ' $INPUT_PACKAGES)
+	pkgs="${packages[*]}"
 	cat > .setup.sh <<-SHELL
 		echo '▷ Installing $pkgs'
 		apk add --update-cache $pkgs
@@ -363,11 +275,12 @@ cat > .setup.sh <<-SHELL
 
 	if [ -d /etc/sudoers.d ]; then
 		echo '▷ Adding sudo rule:'
-		echo '$SUDO_USER ALL=(ALL) NOPASSWD: ALL' | tee /etc/sudoers.d/root
+		echo '$SUDO_USER ALL=(ALL) NOPASSWD: ALL' | tee '/etc/sudoers.d/$SUDO_USER'
+		chmod 440 '/etc/sudoers.d/$SUDO_USER'
 	fi
 	if [ -d /etc/doas.d ]; then
 		echo '▷ Adding doas rule:'
-		echo 'permit nopass keepenv $SUDO_USER' | tee /etc/doas.d/root.conf
+		echo 'permit nopass keepenv $SUDO_USER' | tee '/etc/doas.d/$SUDO_USER.conf'
 	fi
 SHELL
 abin/"$INPUT_SHELL_NAME" --root /.setup.sh
@@ -376,9 +289,5 @@ rm .setup.sh
 endgroup
 #-----------------------------------------------------------------------
 
-echo "root-path=$rootfs_dir" >> $GITHUB_OUTPUT
-echo "$rootfs_dir/abin" >> $GITHUB_PATH
-
-if [ "${GITHUB_STATE:-}" ]; then
-	echo "root_path=$rootfs_dir" >> "$GITHUB_STATE"
-fi
+echo "root-path=$rootfs_dir" >> "$GITHUB_OUTPUT"
+echo "$rootfs_dir/abin" >> "$GITHUB_PATH"

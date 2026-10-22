@@ -9,9 +9,14 @@ esac
 
 rootfs=$(cd "$(dirname "$0")"/.. && pwd)
 oldpwd=$(pwd)
-export | sudo tee "$rootfs"/tmp/.env.sh >/dev/null
+envfile=/tmp/.env.sh
+
+# Pass the job's environment into the chroot. It may contain secrets, so keep
+# the file private to the target user and remove it as soon as it's sourced.
+(umask 077 && export | sudo tee "$rootfs$envfile" >/dev/null)
+sudo chown "$user" "$rootfs$envfile"
 
 exec sudo chroot "$rootfs" \
 	/bin/su "$user" \
-		/bin/sh -lc ". /tmp/.env.sh; cd '$oldpwd' 2>/dev/null; exec \"\$@\"" -- \
+		/bin/sh -lc ". $envfile; rm -f $envfile; cd '$oldpwd' 2>/dev/null; exec \"\$@\"" -- \
 			/bin/sh -eo pipefail "$@"

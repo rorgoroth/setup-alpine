@@ -1,30 +1,22 @@
 const { spawnSync } = require('node:child_process');
 const path = require('node:path');
 
-const inputNames = {
-  'apk-tools-url': 'INPUT_APK_TOOLS_URL',
-  arch: 'INPUT_ARCH',
-  branch: 'INPUT_BRANCH',
-  'extra-keys': 'INPUT_EXTRA_KEYS',
-  'extra-repositories': 'INPUT_EXTRA_REPOSITORIES',
-  'mirror-url': 'INPUT_MIRROR_URL',
-  packages: 'INPUT_PACKAGES',
-  'setup-qemu': 'INPUT_SETUP_QEMU',
-  'shell-name': 'INPUT_SHELL_NAME',
-  volumes: 'INPUT_VOLUMES',
-};
+if (process.platform !== 'linux' || process.arch !== 'x64') {
+  console.log(
+    `::error title=setup-alpine::Only x86_64 Linux runners are supported, ` +
+    `but this runner is ${process.platform}/${process.arch}.`
+  );
+  process.exit(1);
+}
 
-function getInput(name) {
-  const envName = `INPUT_${name.replace(/ /g, '_').toUpperCase()}`;
-  return process.env[envName] || '';
+// The runner exposes inputs as INPUT_<NAME> with hyphens preserved (e.g. INPUT_APK-TOOLS-URL),
+// which can't be referenced from Bash, so rename hyphens to underscores.
+const env = {};
+for (const [key, value] of Object.entries(process.env)) {
+  env[key.startsWith('INPUT_') ? key.replaceAll('-', '_') : key] = value;
 }
 
 const actionPath = path.resolve(__dirname, '..');
-const env = { ...process.env };
-
-for (const [inputName, scriptEnvName] of Object.entries(inputNames)) {
-  env[scriptEnvName] = getInput(inputName);
-}
 
 const result = spawnSync('sudo', ['-E', path.join(actionPath, 'setup-alpine.sh')], {
   cwd: actionPath,

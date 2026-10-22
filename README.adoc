@@ -1,12 +1,13 @@
 = GitHub Action: Setup Alpine Linux
 :proj-name: setup-alpine
-:gh-name: jirutka/{proj-name}
-:gh-branch: v1
+:gh-name: rorgoroth/{proj-name}
+:gh-branch: develop
 :action-ref: {gh-name}@{gh-branch}
-:alpine-latest: v3.15
 :apk-tools: https://gitlab.alpinelinux.org/alpine/apk-tools/[apk-tools]
 
-A https://github.com/features/actions[GitHub Action] to easily set up and use a chroot-based footnote:[If you don’t know what https://en.wikipedia.org/wiki/Chroot[chroot] is, think of it as a very simple container. It’s one of the cornerstones of containers and the only one that is actually needed for this use case.] https://alpinelinux.org/[Alpine Linux] environment in your workflows and emulate any supported CPU architecture (using QEMU).
+A https://github.com/features/actions[GitHub Action] to easily set up and use a chroot-based footnote:[If you don’t know what https://en.wikipedia.org/wiki/Chroot[chroot] is, think of it as a very simple container. It’s one of the cornerstones of containers and the only one that is actually needed for this use case.] https://alpinelinux.org/[Alpine Linux] _edge_ environment (x86_64) in your workflows.
+
+NOTE: This is a trimmed-down fork of https://github.com/jirutka/setup-alpine[jirutka/setup-alpine]. It supports only Alpine `edge` on x86_64 Linux runners.
 
 
 [source, yaml, subs="+attributes"]
@@ -14,8 +15,6 @@ A https://github.com/features/actions[GitHub Action] to easily set up and use a 
 runs-on: ubuntu-latest
 steps:
   - uses: {action-ref}
-    with:
-      branch: {alpine-latest}
 
   - run: cat /etc/alpine-release
     shell: alpine.sh {0}
@@ -27,21 +26,17 @@ _See <<examples, more examples>>…_
 
 * *Easy to use and flexible*
 ** Add one _step_ `uses: {action-ref}` to set up the Alpine environment, for the next steps that should run in this environment, specify `shell: alpine.sh {0}`. See <<examples>> for more.
-** You can switch between one, or even more, Alpine environments and the host system (Ubuntu) within a single _job_ (i.e. each _step_ can run in a different environment). This is ideal, for example, for <<cross-compile-rust, cross-compilations>>.
-
-* *Emulation of non-x86 architectures*
-** This couldn’t be easier; just specify input parameter <<arch>>. The _action_ sets up QEMU user space emulator and installs Alpine Linux environment for the specified architecture. You can then build and run binaries for/from this architecture, just like on real hardware, but (significantly) slower (it’s a software _emulation_ after all).
+** You can switch between one, or even more, Alpine environments and the host system (Ubuntu) within a single _job_ (i.e. each _step_ can run in a different environment).
 
 * *No hassle with Docker images*
-** You don’t have to write any Dockerfiles, for example, to cross-compile Rust crates with C dependencies.footnote:[The popular https://github.com/cross-rs/cross[cross] tool used by https://github.com/actions-rs/cargo#cross-compilation[actions-rs/cargo] action doesn’t allow you to easily install additional packages or whatever needed for building your crate without creating, build and maintaining custom Docker images (https://github.com/cross-rs/cross/issues/281[cross-rs/cross#281]). This just impose unnecessary complexity and boilerplate.]
+** You don’t have to write any Dockerfiles or build and maintain custom Docker images.
 ** No, you really don’t need any so-called “official” Docker image for gcc, nodejs, python or whatever you need… just install it using https://www.mankier.com/8/apk[apk] from https://pkgs.alpinelinux.org/packages[Alpine packages]. It is fast, really fast!
 
 * *Always up to date environment*
-** The whole environment, all packages, are always installed directly from the Alpine Linux’s official repositories using {apk-tools} (Alpine’s package manager). There’s no intermediate layer that tends to lang behind with security fixes (such as Docker images). — You might be thinking, isn’t that slow? No, it’s faster than pulling a Docker image!
-** No, you really don’t need any Docker image to get a stable build environment. Alpine Linux provides stable https://alpinelinux.org/releases/[releases] (branches); these get just (security) fixes, no breaking changes.
+** The whole environment, all packages, are always installed directly from the Alpine Linux’s official repositories using {apk-tools} (Alpine’s package manager). There’s no intermediate layer that tends to lag behind with security fixes (such as Docker images). — You might be thinking, isn’t that slow? No, it’s faster than pulling a Docker image!
 
 * *It’s simple and lightweight*
-** You don’t have to worry about that on a hosted CI service, but still… This _action_ is written in ~220 LoC and uses only basic Unix tools (chroot, mount, wget, Bash, …) and {apk-tools} (Alpine’s package manager). That’s it.
+** You don’t have to worry about that on a hosted CI service, but still… This _action_ is a few hundred lines of Bash and uses only basic Unix tools (chroot, mount, curl, …) and {apk-tools} (Alpine’s package manager). That’s it.
 
 
 == Parameters
@@ -49,30 +44,11 @@ _See <<examples, more examples>>…_
 === Inputs
 
 apk-tools-url::
-URL of the apk-tools static binary to use, or `auto` to select a pinned URL for the current runner architecture.
+URL of the apk-tools static binary to use, or `auto` to select the pinned x86_64 build.
 Custom URLs must end with `#!sha256!` followed by a SHA-256 hash of the file.
 This should normally be left at the default value.
 +
 Default: `auto`
-
-[[arch]] arch::
-CPU architecture to install.
-When the selected architecture is not natively runnable on the host, the action uses https://www.qemu.org/docs/master/user/main.html[QEMU user space emulator] by default.
-Allowed values are: `x86_64` (native), `x86` (native), `aarch64`, `armhf` footnote:[armhf is armv6 with hard-float.], `armv7`, `loongarch64` footnote:[loongarch64 is available since v3.21.], `ppc64le`, `riscv64` footnote:[riscv64 is available since v3.20.], and `s390x`.
-+
-Default: `x86_64`
-
-setup-qemu::
-Whether to install and register QEMU when the selected <<arch>> needs emulation on the current runner.
-Set this to `false` only when using a native compatible runner, such as `ubuntu-24.04-arm` or `ubuntu-22.04-arm` for `aarch64`; otherwise the action will fail early.
-+
-Default: `true`
-
-branch::
-Alpine branch (aka release) to install: `vMAJOR.MINOR`, `latest-stable`, or `edge`.
-+
-Example: `{alpine-latest}` +
-Default: `latest-stable`
 
 extra-keys::
 A list of paths of additional trusted keys (for installing packages from the _extra-repositories_) to copy into _/etc/apk/keys/_.
@@ -81,14 +57,14 @@ The paths should be relative to the workspace directory (the default location of
 Example: `.keys/pkgs@example.org-56d0d9fd.rsa.pub`
 
 extra-repositories::
-A list of additional Alpine repositories to add into _/etc/apk/repositories_ (Alpine’s official _main_ and _community_ repositories are always added).
+A list of additional Alpine repositories to add into _/etc/apk/repositories_ (Alpine’s official _edge_ _main_ and _community_ repositories are always added).
 +
-Example: `http://dl-cdn.alpinelinux.org/alpine/edge/testing`
+Example: `https://dl-cdn.alpinelinux.org/alpine/edge/testing`
 
 mirror-url::
 URL of an Alpine Linux mirror to fetch packages from.
 +
-Default: `http://dl-cdn.alpinelinux.org/alpine`
+Default: `https://dl-cdn.alpinelinux.org/alpine`
 
 packages::
 A list of Alpine packages to install.
@@ -108,9 +84,9 @@ You can specify the source and destination path: `<src-dir>:<dest-dir>`.
 The `<src-dir>` is an absolute path of existing directory on the host system, `<dest-dir>` is an absolute path in the chroot (it will be created if doesn’t exist).
 You can omit the latter if they're the same.
 +
-Please note that _/home/runner/work_ (where’s your workspace located) is always mounted, don’t specify it here.
+Please note that the runner’s work directory (e.g. _/home/runner/work_, where your workspace is located) is always mounted, don’t specify it here.
 +
-Example: `${{ steps.alpine-aarch64.outputs.root-path }}:/mnt/alpine-aarch64`
+Example: `${{ steps.alpine-one.outputs.root-path }}:/mnt/alpine-one`
 
 
 === Outputs
@@ -128,7 +104,7 @@ Path to the created Alpine root directory.
 ----
 runs-on: ubuntu-latest
 steps:
-  - uses: actions/checkout@v4
+  - uses: actions/checkout@v6
 
   - name: Setup latest Alpine Linux
     uses: {action-ref}
@@ -158,47 +134,10 @@ steps:
 ----
 - uses: {action-ref}
   with:
-    branch: {alpine-latest}
     packages: >
       build-base
       libgit2-dev
       meson
-----
-
-
-=== Set up and use Alpine for a different CPU architecture
-
-[source, yaml, subs="+attributes"]
-----
-runs-on: ubuntu-latest
-steps:
-  - name: Setup Alpine Linux {alpine-latest} for aarch64
-    uses: {action-ref}
-    with:
-      arch: aarch64
-      branch: {alpine-latest}
-
-  - name: Run script inside Alpine chroot with aarch64 emulation
-    run: uname -m
-    shell: alpine.sh {0}
-----
-
-=== Set up Alpine aarch64 on a native ARM runner
-
-[source, yaml, subs="+attributes"]
-----
-runs-on: ubuntu-24.04-arm
-steps:
-  - name: Setup Alpine Linux {alpine-latest} for aarch64
-    uses: {action-ref}
-    with:
-      arch: aarch64
-      branch: {alpine-latest}
-      setup-qemu: false
-
-  - name: Run script inside Alpine chroot
-    run: uname -m
-    shell: alpine.sh {0}
 ----
 
 
@@ -209,7 +148,7 @@ steps:
 - uses: {action-ref}
   with:
     extra-repositories: |
-      http://dl-cdn.alpinelinux.org/alpine/edge/testing
+      https://dl-cdn.alpinelinux.org/alpine/edge/testing
     packages: some-pkg-from-testing
 ----
 
@@ -220,94 +159,29 @@ steps:
 ----
 runs-on: ubuntu-latest
 steps:
-  - name: Setup latest Alpine Linux for x86_64
+  - name: Setup the first Alpine Linux environment
+    id: alpine-one
     uses: {action-ref}
     with:
-      shell-name: alpine-x86_64.sh
+      shell-name: alpine-one.sh
 
-  - name: Setup latest Alpine Linux for aarch64
+  - name: Setup the second Alpine Linux environment (with the first one mounted into it)
     uses: {action-ref}
     with:
-      arch: aarch64
-      shell-name: alpine-aarch64.sh
+      shell-name: alpine-two.sh
+      volumes: ${{ steps.alpine-one.outputs.root-path }}:/mnt/alpine-one
 
-  - name: Run script inside Alpine chroot
-    run: uname -m
-    shell: alpine-x86_64.sh {0}
+  - name: Run script inside the first chroot
+    run: cat /etc/alpine-release
+    shell: alpine-one.sh {0}
 
-  - name: Run script inside Alpine chroot with aarch64 emulation
-    run: uname -m
-    shell: alpine-aarch64.sh {0}
+  - name: Run script inside the second chroot
+    run: ls /mnt/alpine-one
+    shell: alpine-two.sh {0}
 
   - name: Run script on the host system (Ubuntu)
     run: cat /etc/os-release
     shell: bash
-----
-
-
-[[cross-compile-rust]]
-=== Cross-compile Rust application with system libraries
-
-[source, yaml, subs="+attributes"]
-----
-runs-on: ubuntu-latest
-strategy:
-  matrix:
-    include:
-      - rust-target: aarch64-unknown-linux-musl
-        os-arch: aarch64
-env:
-  CROSS_SYSROOT: /mnt/alpine-${{ matrix.os-arch }}
-steps:
-  - uses: actions/checkout@v4
-
-  - name: Set up Alpine Linux for ${{ matrix.os-arch }} (target arch)
-    id: alpine-target
-    uses: {action-ref}
-    with:
-      arch: ${{ matrix.os-arch }}
-      branch: edge
-      packages: >
-        dbus-dev
-        dbus-static
-      shell-name: alpine-target.sh
-
-  - name: Set up Alpine Linux for x86_64 (build arch)
-    uses: {action-ref}
-    with:
-      arch: x86_64
-      packages: >
-        build-base
-        pkgconf
-        lld
-        rustup
-      volumes: ${{ steps.alpine-target.outputs.root-path }}:${{ env.CROSS_SYSROOT }}
-      shell-name: alpine.sh
-
-  - name: Install Rust stable toolchain via rustup
-    run: rustup-init --target ${{ matrix.rust-target }} --default-toolchain stable --profile minimal -y
-    shell: alpine.sh {0}
-
-  - name: Build statically linked binary
-    env:
-      CARGO_BUILD_TARGET: ${{ matrix.rust-target }}
-      CARGO_PROFILE_RELEASE_STRIP: symbols
-      PKG_CONFIG_ALL_STATIC: '1'
-      PKG_CONFIG_LIBDIR: ${{ env.CROSS_SYSROOT }}/usr/lib/pkgconfig
-      RUSTFLAGS: -C linker=/usr/bin/ld.lld
-      SYSROOT: /dummy  # workaround for https://github.com/rust-lang/pkg-config-rs/issues/102
-    run: |
-      # Workaround for https://github.com/rust-lang/pkg-config-rs/issues/102.
-      echo -e '#!/bin/sh\nPKG_CONFIG_SYSROOT_DIR=${{ env.CROSS_SYSROOT }} exec pkgconf "$@"' \
-          | install -m755 /dev/stdin pkg-config
-      export PKG_CONFIG="$(pwd)/pkg-config"
-      cargo build --release --locked --verbose
-    shell: alpine.sh {0}
-
-  - name: Try to run the binary
-    run: ./myapp --version
-    working-directory: target/${{ matrix.rust-target }}/release
-    shell: alpine-target.sh {0}
 ----
 
 
