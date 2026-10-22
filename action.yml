@@ -55,8 +55,7 @@ inputs:
 outputs:
   root-path:
     description: >
-      Path to the created Alpine root directory (also exposed in environment
-      variable ALPINE_ROOT_PATH).
+      Path to the created Alpine root directory.
 
 runs:
   using: node24
