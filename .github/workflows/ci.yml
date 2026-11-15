@@ -14,6 +14,8 @@ jobs:
       matrix:
         host-os:
           - ubuntu-latest
+          - ubuntu-26.04  # sudo-rs and uutils coreutils by default
+          - ubuntu-24.04
           - ubuntu-22.04
     runs-on: ${{ matrix.host-os }}
     timeout-minutes: 15

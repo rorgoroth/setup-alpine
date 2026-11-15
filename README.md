@@ -37,8 +37,8 @@ _See [more examples](#usage-examples)…_
 
 ## Requirements
 
-- A Linux **x86_64** runner. On any other platform or architecture the action fails early with an error. It's tested on GitHub-hosted `ubuntu-latest` and `ubuntu-22.04`.
-- Passwordless `sudo` for the runner user (as on GitHub-hosted runners), plus `curl`, `lsof` and `getent` on the host.
+- A Linux **x86_64** runner. On any other platform or architecture the action fails early with an error. It's tested on GitHub-hosted `ubuntu-latest` (Ubuntu 26.04), `ubuntu-26.04`, `ubuntu-24.04` and `ubuntu-22.04`.
+- Passwordless `sudo` for the runner user (as on GitHub-hosted runners), plus `curl`, `lsof` and `getent` on the host. Both the original sudo and sudo-rs (the default `sudo` since Ubuntu 25.10) are supported.
 - For self-hosted runners: Actions Runner v2.327.1 or newer, which is the minimum for actions that run on `node24`.
 
 

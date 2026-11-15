@@ -18,7 +18,16 @@ for (const [key, value] of Object.entries(process.env)) {
 
 const actionPath = path.resolve(__dirname, '..');
 
-const result = spawnSync('sudo', ['-E', path.join(actionPath, 'setup-alpine.sh')], {
+// `sudo -E` can't be used to hand the environment to the setup script: sudo-rs, the default
+// `sudo` since Ubuntu 25.10 (and so on `ubuntu-latest` = 26.04), ignores it and runs the command
+// with a reset environment. Instead run the script via `env` (as the command, so no SETENV
+// permission is needed), which works the same with sudo-rs and the original sudo.
+// Only what the script reads is passed: the action's inputs plus the runner/workflow variables.
+const passEnv = Object.entries(env)
+  .filter(([key]) => /^(INPUT_|GITHUB_|RUNNER_)/.test(key) && !key.includes('='))
+  .map(([key, value]) => `${key}=${value}`);
+
+const result = spawnSync('sudo', ['env', ...passEnv, path.join(actionPath, 'setup-alpine.sh')], {
   cwd: actionPath,
   env,
   stdio: 'inherit',
