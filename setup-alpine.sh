@@ -85,7 +85,7 @@ words() {
 
 # Returns the pinned apk.static URL.
 auto_apk_tools_url() {
-	echo 'https://github.com/rorgoroth/setup-alpine/releases/download/apk.static-3.0.8/apk.static#!sha256!9c16dbcc6328da9c62906c6ba27f96a228b09327230ef7febea694ff15fc942d'
+	echo 'https://github.com/rorgoroth/setup-alpine/releases/download/apk-static-3.0.9/apk.static#!sha256!ef7232378621c3a9b91247f4767ce4067ff9006a9b7ffd3045a27bca84e21c59'
 }
 
 # Downloads a file from URL $1 to path $2 and verify its integrity.
